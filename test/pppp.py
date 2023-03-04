@@ -16,6 +16,8 @@ class PPPPTestCase(unittest.TestCase):
     def setUpClass(cls):
         pass
 
+
+
     def test_constructor(self):
 
         def constructor(self):
@@ -35,6 +37,8 @@ class PPPPTestCase(unittest.TestCase):
         self.assertEqual(test.value , "Test_instance_value")
         self.assertEqual(Test.data  , "Test_class_data")
         self.assertEqual(Test.value , "Test_class_value")
+
+
 
     def test_property(self):
 
@@ -75,7 +79,6 @@ class PPPPTestCase(unittest.TestCase):
 
         self.assertEqual(type(Sub1.value) , property)
 
-
         class Sub2(Base):
 
             data = "Sub2_class_data"
@@ -105,6 +108,8 @@ class PPPPTestCase(unittest.TestCase):
 
         self.assertEqual(type(Sub2.value) , property)
 
+
+
     def test_simple(self):
         @access
         class Base():
@@ -125,6 +130,8 @@ class PPPPTestCase(unittest.TestCase):
         with self.assertRaises(AttributeError) as cm:
             print(base.data_private)
 
+
+
     def test_access_redefinition(self):
         @access
         class Base():
@@ -141,6 +148,8 @@ class PPPPTestCase(unittest.TestCase):
         with self.assertRaises(AttributeError) as cm:
             class Sub1(Base):
                 data_public: public
+
+
 
     def test_subclassing(self):
         @access
@@ -187,7 +196,10 @@ class PPPPTestCase(unittest.TestCase):
         with self.assertRaises(AttributeError) as cm:
             print(sub2.data_private)
 
+
+
     def test_attribute_method_replacement(self):
+
         def __getattribute__(self, name: str) -> Any:
             return super(Base, self).__getattribute__(name)
         
@@ -196,6 +208,7 @@ class PPPPTestCase(unittest.TestCase):
         
         def __setattr__(self, name: str, value) -> Any:
             return super(Base, self).__setattr__(name,value)
+        
         @access
         class Base():
 
@@ -207,7 +220,6 @@ class PPPPTestCase(unittest.TestCase):
                 self.data_private   = "Base_instance_data_private"
                 self.data_protected = "Base_instance_data_protected"
                 self.data_public    = "Base_instance_data_public"
-
             
         base = Base()
         self.assertEqual(base.data_public   , "Base_instance_data_public")
@@ -224,6 +236,8 @@ class PPPPTestCase(unittest.TestCase):
             Base.__getattr__ = __getattr__
         with self.assertRaises(AttributeError) as cm:
             Base.__setattr__ = __setattr__
+
+
 
     def test_attribute_method_overriding(self):
         @access
@@ -248,6 +262,8 @@ class PPPPTestCase(unittest.TestCase):
         with self.assertRaises(AttributeError) as cm:
             self.assertEqual(base.data_private  , "Base_instance_data_private")
 
+
+
     def test(self):
 
         class Base():
@@ -264,6 +280,8 @@ class PPPPTestCase(unittest.TestCase):
         self.assertEqual(sub.data_public        , "Base_class_data_public")
         with self.assertRaises(AttributeError) as cm:
             self.assertEqual(sub.data_private   , "Base_instance_data_private")
+
+
 
 if __name__ == '__main__':
     unittest.main()

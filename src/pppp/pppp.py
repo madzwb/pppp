@@ -1,6 +1,6 @@
 import inspect
 from copy import deepcopy
-from types import CodeType, FrameType
+from types import FrameType
 from typing import Annotated, Any, Type, get_origin, get_args
 
 """
@@ -54,16 +54,10 @@ def _caller_type(cls: str, frame: FrameType|None):
 
 
 
-
-
-
 class meta_access(type):
 
     __constructor__ = None
     __raccess__     = {}
-
-    # def __init__(cls,name,base,dicts,**kwargs):
-    #    super().__init__(name,base,dicts,**kwargs)
 
     @staticmethod
     def __is_me(cls, cls_) -> bool:
@@ -71,6 +65,7 @@ class meta_access(type):
 
     @staticmethod
     def __is_subclass(cls, cls_) -> bool:
+        # inspect.isclass(cls_) - for debugger
         return cls_ and cls and (cls_ == cls or (inspect.isclass(cls_) and issubclass(cls_, cls)))
 
     # @staticmethod
@@ -81,6 +76,7 @@ class meta_access(type):
     # def __is_grandchild(cls, cls_) -> bool:
     #     return cls_ != None and issubclass(cls_, meta_access) and (cls_ not in type.__subclasses__(cls))
     
+    """ Just hook with access check. """
     def __getattribute__(cls, name: str) -> Any:
         frame = inspect.currentframe()
         if not _me(frame):
@@ -89,6 +85,7 @@ class meta_access(type):
 
         return super(meta_access, cls).__getattribute__(name)
 
+    """ Just hook with access check. """
     def __getattr__(cls, name):
         frame = inspect.currentframe()
         if not _me(frame):
@@ -119,8 +116,7 @@ class meta_access(type):
                 return attribute.__set__(cls, value)
         return super(meta_access, cls).__setattr__(name, value)
 
-    # def __repr__(cls) -> str:
-    #     return super().__repr__()
+
 
 public      = Annotated[Any, None]
 protected   = Annotated[Any, meta_access._meta_access__is_subclass]
@@ -131,9 +127,10 @@ meta_access.__raccess__[meta_access._meta_access__is_subclass]  = "protected"
 meta_access.__raccess__[meta_access._meta_access__is_me]        = "private"
 
 
+
 class object_access(metaclass=meta_access):
 
-    # Hardcoded access to attributes method.
+    # Hardcoded access to attributes method to be protected.
     # __getattribute__: protected
     # __getattr__     : protected
     # __setattr__     : protected
@@ -143,6 +140,9 @@ class object_access(metaclass=meta_access):
         "__setattr__"      : meta_access._meta_access__is_subclass
     }
 
+    """
+        Fill __access__ attribute with class type hints.
+    """
     def __init_subclass__(cls, **kwargs):
         access = {}
         __raccess__     = type.__getattribute__(object_access   , "__raccess__")
@@ -179,6 +179,9 @@ class object_access(metaclass=meta_access):
             _cls = None
         return _cls, _access
 
+    """
+        Main attribute access checker.
+    """
     @classmethod
     def _check_access(cls, frame: FrameType|None, name: str):
         _type   = _caller_type(cls.__name__, frame)
@@ -186,11 +189,18 @@ class object_access(metaclass=meta_access):
         if _access and _cls and not _access(_cls, _type):
             raise AttributeError(f"Access to attribute:'{name}' restricted by '{object_access.__raccess__[_access]}' keyword.")
 
+    """
+        Check if attribute is in __dict__.
+    """
     def __is_instance(self, name: str):
         # __dict__ = self.__dict__
         __dict__ = object.__getattribute__(self, "__dict__")
         return __dict__ if __dict__ and name in __dict__ else None
 
+    """
+        Check if specified function is a called.
+        Needed for contructor hooking.
+    """
     def __is_child_function(self, frame: FrameType|None, function: str = "__init__"):
         if      frame                               \
             and (frame := frame.f_back)             \
@@ -200,6 +210,9 @@ class object_access(metaclass=meta_access):
             return object.__setattr__
         return None
     
+    """
+        Check if attribute is a property or descriptor of some class.
+    """
     def __is_class(self, name: str, reverse: bool = False):
         _class = None
         _attribute = None
@@ -227,6 +240,7 @@ class object_access(metaclass=meta_access):
                 break
         return _class, _attribute, _set
 
+    """ Just hook with access check. """
     def __getattribute__(self, name: str) -> Any:
         frame = inspect.currentframe()
         if not _me(frame):
@@ -234,6 +248,7 @@ class object_access(metaclass=meta_access):
         del frame
         return super(object_access, self).__getattribute__(name)
 
+    """ Just hook with access check. """
     def __getattr__(self, name):
         frame = inspect.currentframe()
         if not _me(frame):
@@ -271,6 +286,10 @@ class object_access(metaclass=meta_access):
                 
 
 
+"""
+    Redfine base class by type function.
+    Copy all __dict__ values.
+"""
 def access(class_) -> Type:
     # Check if already subclass of object_access
     if issubclass(class_, object_access):
@@ -292,6 +311,8 @@ def access(class_) -> Type:
             _dict[k] = deepcopy(v)
         except Exception as e:
             pass
+
+    # TODO:
     for k,v in class_.__base__.__dict__.items():
         if not k.startswith("__") and not k.endswith("__"):
             try:    # to copy all copyable
