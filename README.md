@@ -5,6 +5,7 @@ Track constructor replacement.
 Protect attribute access methods from replacement.
 
 Basic usages:
+
     @access
     class Base():
         data_private    :  private      # Will be accessible only in Base class
