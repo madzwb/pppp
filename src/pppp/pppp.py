@@ -54,57 +54,6 @@ def _caller_type(cls: str, frame: FrameType|None):
 
 
 
-class descriptor():
-
-    def __init__(self, value: Any|None = ..., / , is_private: bool = True, is_readonly: bool = False, is_data: bool = True):
-        self.value          = value
-        self.is_private     = is_private
-        self.is_readonly    = is_readonly
-        self.is_data        = is_data
-        # if self.has_data:
-            # Define __set__ to make data descriptor.
-            # That takes precedence over the same name entry in instance’s dictionary.
-            # setattr(self.__class__,"__set__", self.__set__)
-        return
-
-    def __set_name__(self, owner_, name_) -> None:
-        is_static = issubclass(owner_,object_access)
-        # self.data  = self.value
-        self.owner  = owner_
-        self.name   = name_
-
-    def __get__(self, object_, type_ = None) -> Any:
-        if self.is_private and not object_ and type_ != self.owner:
-            raise AttributeError(f"Access descriptor: {type_} != {self.owner}.")
-        if self.value and isinstance(self.value, CodeType):
-            try:
-                self.datas = eval(self.value, globals(), locals())
-                return self.datas
-            except Exception as e:
-                self.value = None
-        return self.value
-        # if type_ == self.owner:
-        #     return self.value
-        # if object_ is not None: # For class instance raises AttributeError, for subsequent call of __getattr__.
-        #     e = AttributeError(f"Class attribute: '{self.name}' not found.",self, self.name)
-        #     print(e)
-        #     raise e
-        # else:
-        #     return None
-        # return self.datas
-        
-    def __set__(self, object_, value_) -> None:
-        if self.is_readonly: return
-        # if self.read_only and not object_:
-        #     e = AttributeError(f"Class attribute: '{self.name}' is read-only.",self, self.name)
-        #     print(e)
-        #     raise e
-        # else:
-        #     # _class  = object.__getattribute__(object_,  "__class__")
-        #     _dict   = object.__getattribute__(object_,   "__dict__")
-        #     _dict[self.name] = value
-        # return
-        self.value = value_
 
 
 
@@ -124,13 +73,13 @@ class meta_access(type):
     def __is_subclass(cls, cls_) -> bool:
         return cls_ and cls and (cls_ == cls or (inspect.isclass(cls_) and issubclass(cls_, cls)))
 
-    @staticmethod
-    def __is_child(cls, cls_) -> bool:
-        return cls_ in cls.__subclasses__()
+    # @staticmethod
+    # def __is_child(cls, cls_) -> bool:
+    #     return cls_ in cls.__subclasses__()
 
-    @staticmethod
-    def __is_grandchild(cls, cls_) -> bool:
-        return cls_ != None and issubclass(cls_, meta_access) and (cls_ not in type.__subclasses__(cls))
+    # @staticmethod
+    # def __is_grandchild(cls, cls_) -> bool:
+    #     return cls_ != None and issubclass(cls_, meta_access) and (cls_ not in type.__subclasses__(cls))
     
     def __getattribute__(cls, name: str) -> Any:
         frame = inspect.currentframe()
@@ -184,6 +133,7 @@ meta_access.__raccess__[meta_access._meta_access__is_me]        = "private"
 
 class object_access(metaclass=meta_access):
 
+    # Hardcoded access to attributes method.
     # __getattribute__: protected
     # __getattr__     : protected
     # __setattr__     : protected
@@ -359,116 +309,116 @@ def access(class_) -> Type:
 
 if __name__ == '__main__':
 
-    def class_name(name: str):
-        return compile(name + ".__name__.lower()", "<string>", "eval")
+    # def class_name(name: str):
+    #     return compile(name + ".__name__.lower()", "<string>", "eval")
 
-    class Prop():
+    # class Prop():
 
-        def __init__(self, value):
-            self._value = value
+    #     def __init__(self, value):
+    #         self._value = value
 
-        @property
-        def value(self):
-            return self._value
+    #     @property
+    #     def value(self):
+    #         return self._value
         
-        @value.setter
-        def value(self, value):
-            self._value = value
+    #     @value.setter
+    #     def value(self, value):
+    #         self._value = value
 
-    def constructor(self):
-        self._value = None
-        self.data   = "PropBase_instance_data"
-        self.value  = "PropBase_instance_value"
+    # def constructor(self):
+    #     self._value = None
+    #     self.data   = "PropBase_instance_data"
+    #     self.value  = "PropBase_instance_value"
 
-    @access
-    class PropBase():
+    # @access
+    # class PropBase():
 
-        __doc__: public
+    #     __doc__: public
 
-        data = "PropBase_class_data"
-        value = "PropBase_class_value"
+    #     data = "PropBase_class_data"
+    #     value = "PropBase_class_value"
 
-    PropBase.__init__ = constructor
+    # PropBase.__init__ = constructor
 
-    class PropFirst(PropBase):
+    # class PropFirst(PropBase):
 
-        data = "PropFirst_class_data"
+    #     data = "PropFirst_class_data"
 
-        name = descriptor(class_name("PropFirst"))
+    #     name = descriptor(class_name("PropFirst"))
 
-        def __init__(self, value):
-            super().__init__()
-            self.data   = value + "_instance_data"
-            self.value  = value + "_property_value"
+    #     def __init__(self, value):
+    #         super().__init__()
+    #         self.data   = value + "_instance_data"
+    #         self.value  = value + "_property_value"
         
-        @property
-        def value(self):
-            return self._value
+    #     @property
+    #     def value(self):
+    #         return self._value
         
-        @value.setter
-        def value(self, value):
-            self._value = value
+    #     @value.setter
+    #     def value(self, value):
+    #         self._value = value
 
-    class PropSecond(PropFirst):
+    # class PropSecond(PropFirst):
 
-        data = "PropSecond_class_data"
+    #     data = "PropSecond_class_data"
 
-        name = descriptor(class_name("PropSecond"))
+    #     name = descriptor(class_name("PropSecond"))
 
-        def __init__(self, value):
-            super().__init__(value)
-            self.data   = value + "_instance_data"
-            self.value  = value + "_property_value"
+    #     def __init__(self, value):
+    #         super().__init__(value)
+    #         self.data   = value + "_instance_data"
+    #         self.value  = value + "_property_value"
         
-        @property
-        def value(self):
-            return self._value
+    #     @property
+    #     def value(self):
+    #         return self._value
         
-        @value.setter
-        def value(self, value):
-            self._value = value
+    #     @value.setter
+    #     def value(self, value):
+    #         self._value = value
 
-    # subclasses = PropFirst.__childs__
+    # # subclasses = PropFirst.__childs__
 
-    prop = Prop("Prop")
-    print(prop.value)
-    print(Prop.value)
+    # prop = Prop("Prop")
+    # print(prop.value)
+    # print(Prop.value)
 
 
-    propbase = PropBase()
-    print(propbase.data)
-    print(propbase.value)
+    # propbase = PropBase()
+    # print(propbase.data)
+    # print(propbase.value)
 
-    prop1 = PropFirst("PropFirst")
-    print(prop1.data)
-    print(prop1.value)
-    print(prop1.name)
+    # prop1 = PropFirst("PropFirst")
+    # print(prop1.data)
+    # print(prop1.value)
+    # print(prop1.name)
 
-    doc = getattr(PropBase,"__doc__")
-    setattr(PropBase,"__doc__","PropFirst")
-    doc = getattr(PropBase,"__doc__")
+    # doc = getattr(PropBase,"__doc__")
+    # setattr(PropBase,"__doc__","PropFirst")
+    # doc = getattr(PropBase,"__doc__")
 
-    print(PropBase.data)
-    print(PropBase.name)
+    # print(PropBase.data)
+    # print(PropBase.name)
 
-    print(PropFirst.data)
-    print(PropFirst.value)
-    print(PropFirst.name)
-    print()
-    prop2 = PropSecond("PropSecond")
-    print(prop2.data)
-    print(prop2.value)
-    print(prop2.name)
+    # print(PropFirst.data)
+    # print(PropFirst.value)
+    # print(PropFirst.name)
+    # print()
+    # prop2 = PropSecond("PropSecond")
+    # print(prop2.data)
+    # print(prop2.value)
+    # print(prop2.name)
 
-    print(PropBase.data)
-    print(PropBase.name)
+    # print(PropBase.data)
+    # print(PropBase.name)
 
-    print(PropFirst.data)
-    print(PropFirst.value)
-    print(PropFirst.name)
+    # print(PropFirst.data)
+    # print(PropFirst.value)
+    # print(PropFirst.name)
 
-    print(PropSecond.data)
-    print(PropSecond.value)
-    print(PropSecond.name)
+    # print(PropSecond.data)
+    # print(PropSecond.value)
+    # print(PropSecond.name)
 
     pass
