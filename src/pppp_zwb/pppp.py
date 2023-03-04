@@ -1,30 +1,58 @@
 import inspect
 from copy import deepcopy
 from types import CodeType, FrameType
-from typing import Annotated, Any, Type, get_type_hints, get_origin, get_args
+from typing import Annotated, Any, Type, get_origin, get_args
 
-def _is_my(frame: FrameType|None):
+"""
+    Check if caller is a meta_access or object_access class
+"""
+def _me(frame: FrameType|None):
     return      frame.f_code.co_qualname.startswith("meta_access")     \
             or  frame.f_code.co_qualname.startswith("object_access")   \
                 if frame and (frame := frame.f_back) else False
 
-def _caller_type(frame: FrameType|None):
+
+"""
+    Return class name and method name from a frame
+"""
+def _get_caller(frame):
+    cls_name = None
+    fun_name = None
+    if frame:
+        qualname = frame.f_code.co_qualname
+        names = qualname.split(".")
+        length = len(names)
+        cls_name = names[length - 2] if length >= 2 else names[length - 1]
+        fun_name = names[-1]
+    return cls_name, fun_name
+
+"""
+    Return class type of the caller. If method is overrided, returned type and method from backward frame.
+"""
+def _caller_type(cls: str, frame: FrameType|None):
     cls_type = None
     cls_name = None
-    while frame and (frame := frame.f_back):
-        _globals = frame.f_globals
-        _locals = frame.f_locals
-        if not cls_name:
-            qualname = frame.f_code.co_qualname
-            names = qualname.split(".")
-            length = len(names)
-            cls_name = names[length - 2] if length > 2 else names[length - 1]
-        try:
-            cls_type = eval(cls_name,_globals, _locals) if cls_name else None
-            break
-        except Exception as e:
-            pass
+    if frame:
+        ocls_name, ofun_name = _get_caller(frame)
+        if frame := frame.f_back:
+            cls_name, fun_name = _get_caller(frame)
+            if cls == cls_name and ofun_name == fun_name:
+                frame = frame.f_back
+                cls_name, fun_name = _get_caller(frame)
+        
+            while frame:
+                _globals = frame.f_globals
+                _locals = frame.f_locals
+                try:
+                    cls_type = eval(cls_name, _globals, _locals) if cls_name else None
+                    break
+                except Exception as e:
+                    pass
+                frame = frame.f_back
+
     return cls_type
+
+
 
 class descriptor():
 
@@ -83,56 +111,51 @@ class descriptor():
 class meta_access(type):
 
     __constructor__ = None
-    __childs__      = []
     __raccess__     = {}
 
     # def __init__(cls,name,base,dicts,**kwargs):
     #    super().__init__(name,base,dicts,**kwargs)
 
-    @classmethod
-    def _check_access(cls, frame: FrameType|None, name: str):
-        _type = _caller_type(frame)
-        __access__ = None
-        try:
-            __access__ = getattr(cls, "__access__")
-        except Exception as e:
-            pass
-        _access = __access__.get(name) if __access__ else None
-        if _access and not _access(_type):
-            raise AttributeError(f"Access to attribute:'{name}' restricted by '{object_access.__raccess__[_access]}' keyword.")
-
-    @classmethod
+    @staticmethod
     def __is_me(cls, cls_) -> bool:
-        return cls_ == meta_access
+        return cls_ == cls
 
-    @classmethod
+    @staticmethod
+    def __is_subclass(cls, cls_) -> bool:
+        return cls_ and cls and (cls_ == cls or (inspect.isclass(cls_) and issubclass(cls_, cls)))
+
+    @staticmethod
     def __is_child(cls, cls_) -> bool:
-        return cls_ in cls.__childs__
+        return cls_ in cls.__subclasses__()
 
-    @classmethod
+    @staticmethod
     def __is_grandchild(cls, cls_) -> bool:
-        return cls_ != None and issubclass(cls_, meta_access) and (cls_ not in cls.__childs__)
+        return cls_ != None and issubclass(cls_, meta_access) and (cls_ not in type.__subclasses__(cls))
     
     def __getattribute__(cls, name: str) -> Any:
         frame = inspect.currentframe()
-        if not _is_my(frame):
-            cls._check_access(cls, frame, name)
+        if not _me(frame):
+            cls._check_access(frame, name)
         del frame
 
         return super(meta_access, cls).__getattribute__(name)
 
     def __getattr__(cls, name):
         frame = inspect.currentframe()
-        if not _is_my(frame):
-            cls._check_access(cls, frame, name)
+        if not _me(frame):
+            cls._check_access(frame, name)
         del frame
 
         return super(meta_access, cls).__getattribute__(name)
 
+    """
+        Check for permissions. Process object's attributes with default behaviour.
+        Store __init__ replacement with UDF in __contruction__ attribute.
+    """
     def __setattr__(cls, name: str, value: Any) -> None:
         frame = inspect.currentframe()
-        if not _is_my(frame):
-            cls._check_access(cls, frame, name)
+        if not _me(frame):
+            cls._check_access(frame, name)
         del frame
 
         if name == "__init__" and value:
@@ -150,36 +173,67 @@ class meta_access(type):
     # def __repr__(cls) -> str:
     #     return super().__repr__()
 
+public      = Annotated[Any, None]
+protected   = Annotated[Any, meta_access._meta_access__is_subclass]
+private     = Annotated[Any, meta_access._meta_access__is_me]
+
+meta_access.__raccess__[None]                                   = "public"
+meta_access.__raccess__[meta_access._meta_access__is_subclass]  = "protected"
+meta_access.__raccess__[meta_access._meta_access__is_me]        = "private"
+
 
 class object_access(metaclass=meta_access):
 
+    # __getattribute__: protected
+    # __getattr__     : protected
+    # __setattr__     : protected
+    __access__ = {
+        "__getattribute__" : meta_access._meta_access__is_subclass,
+        "__getattr__"      : meta_access._meta_access__is_subclass,
+        "__setattr__"      : meta_access._meta_access__is_subclass
+    }
+
     def __init_subclass__(cls, **kwargs):
-        __childs__  = object.__getattribute__(object_access, "__childs__")
-        __base__    = object.__getattribute__(cls   , "__base__")
-        if __base__ == object_access and cls not in __childs__:
-            __childs__.append(cls)
-        
         access = {}
-        __raccess__     = object.__getattribute__(object_access, "__raccess__")
-        __annotations__ = object.__getattribute__(cls   , "__annotations__")
+        __raccess__     = type.__getattribute__(object_access   , "__raccess__")
+        __annotations__ = type.__getattribute__(cls             , "__annotations__")
         for name, annotation in __annotations__.items():
             origin = get_origin(annotation)
             if origin == Annotated:
                 ann_arg = get_args(annotation)
                 if len(ann_arg) > 1 and ann_arg[1] in __raccess__:
                     access[name] = ann_arg[1]
+        for name in access:
+            _cls, _access = cls.__base__._find_access(name)
+            if _cls:
+                raise AttributeError(f"Access to attribute:'{name}' already defined in class:'{_cls.__name__}' with '{object_access.__raccess__[_access]}' keyword.") 
         if access:
             type.__setattr__(cls, "__access__", deepcopy(access))
 
-    def _check_access(self, frame: FrameType|None, name: str):
-        _type = _caller_type(frame)
-        __access__ = None
-        try:
-            __access__ = getattr(self, "__access__")
-        except Exception as e:
-            pass
-        _access = __access__.get(name) if __access__ else None
-        if _access and not _access(_type):
+    @classmethod
+    def _find_access(cls, name: str, reverse: bool = False):
+        _cls    = None
+        _access = None
+        if reverse:
+            mro = reversed(cls.__mro__)
+        else:
+            mro = cls.__mro__
+        found = False
+        for _cls in mro:
+            __access__ = getattr(_cls, "__access__", [])
+            if name in __access__:
+                _access = __access__[name]
+                found = True
+                break
+        if not found:
+            _cls = None
+        return _cls, _access
+
+    @classmethod
+    def _check_access(cls, frame: FrameType|None, name: str):
+        _type   = _caller_type(cls.__name__, frame)
+        _cls, _access = cls._find_access(name, True)
+        if _access and _cls and not _access(_cls, _type):
             raise AttributeError(f"Access to attribute:'{name}' restricted by '{object_access.__raccess__[_access]}' keyword.")
 
     def __is_instance(self, name: str):
@@ -225,48 +279,44 @@ class object_access(metaclass=meta_access):
 
     def __getattribute__(self, name: str) -> Any:
         frame = inspect.currentframe()
-        if not _is_my(frame):
-            self._check_access(frame, name)
+        if not _me(frame):
+            type(self)._check_access(frame, name)
         del frame
         return super(object_access, self).__getattribute__(name)
 
     def __getattr__(self, name):
         frame = inspect.currentframe()
-        if not _is_my(frame):
-            self._check_access(frame, name)
+        if not _me(frame):
+            type(self)._check_access(frame, name)
         del frame
         return object.__getattribute__(self, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
 
         frame = inspect.currentframe()
+        if not _me(frame):
+            type(self)._check_access(frame, name)
+            
         __constructor__ = type.__getattribute__(type(self),"__constructor__")
         if not __constructor__:
             __constructor__ = "__init__"
         _object = self.__is_child_function(frame,__constructor__)
 
-        if not _object:
-            if not _is_my(frame):
-                self._check_access(frame, name)
-            del frame
-            
+        del frame
+
         _dict = self.__is_instance(name)
         _class, _attribute, _set = self.__is_class(name, _dict == None and _object != None)
 
         if (_dict or _object) and not _set: # Define
             self.__dict__[name] = value
             return
-        if _set:                    # Descriptor
+        if _set:                            # Descriptor
             _set(self, value)
             return
-        if _class:                  # Class
+        if _class:                          # Class
             _class.__class__.__setattr__(_class, name, value)
             return
 
-        # if _object:
-        #     _object(self, name, value)
-        # else:
-        #     self.__dict__[name] = value
         return super(object_access, self).__setattr__(name, value)
                 
 
@@ -287,28 +337,25 @@ def access(class_) -> Type:
             :
                 raise TypeError(f"Class: {class_} have inherit meta from {cls} by metaclass: {cls.__class__}, with overriden attributes' getter-setter.")
     _dict = {}
-    # f = ["__dict__", "__weakref__"]
     for k,v in class_.__dict__.items():
-        # if k not in f:
-        try:
+        try:    # to copy all copyable
             _dict[k] = deepcopy(v)
         except Exception as e:
             pass
-        # else:
-        #     a = getattr(class_,k)
+    for k,v in class_.__base__.__dict__.items():
+        if not k.startswith("__") and not k.endswith("__"):
+            try:    # to copy all copyable
+                _dict[k] = deepcopy(v)
+            except Exception as e:
+                pass
+    # for k,v in class_.__base__.__dict__.items():
+    #     try:    # to copy all copyable
+    #         _dict[k] = deepcopy(v)
+    #     except Exception as e:
+    #         pass
     name = class_.__name__
     del class_
     return type(name, (object_access,), _dict)
-
-public      = Annotated[Any, None]
-protected   = Annotated[Any, meta_access._meta_access__is_grandchild]
-private     = Annotated[Any, meta_access._meta_access__is_child]
-
-meta_access.__raccess__[None]                      = "public"
-meta_access.__raccess__[meta_access._meta_access__is_grandchild] = "protected"
-meta_access.__raccess__[meta_access._meta_access__is_child]      = "private"
-
-
 
 if __name__ == '__main__':
 
