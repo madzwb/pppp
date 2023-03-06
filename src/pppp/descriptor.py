@@ -1,6 +1,6 @@
 from typing import Any
-
-import pppp
+from types import CodeType
+from .pppp import object_access
 
 class descriptor():
 
@@ -16,7 +16,7 @@ class descriptor():
         return
 
     def __set_name__(self, owner_, name_) -> None:
-        is_static = issubclass(owner_, pppp.object_access)
+        is_static = issubclass(owner_, object_access)
         # self.data  = self.value
         self.owner  = owner_
         self.name   = name_

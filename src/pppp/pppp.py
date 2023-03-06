@@ -18,41 +18,141 @@ def _me(frame: FrameType|None):
 def _get_caller(frame):
     cls_name = None
     fun_name = None
+    caller   = None
     if frame:
         qualname = frame.f_code.co_qualname
         names = qualname.split(".")
         length = len(names)
+
         cls_name = names[length - 2] if length >= 2 else names[length - 1]
         fun_name = names[-1]
-    return cls_name, fun_name
+        caller   = list(frame.f_locals.values())[0] if len(frame.f_locals) else None
+    return cls_name, fun_name, caller
 
 """
     Return class type of the caller. If method is overrided, returned type and method from backward frame.
 """
-def _caller_type(cls: str, frame: FrameType|None):
-    cls_type = None
-    cls_name = None
+def _caller(cls: str, frame: FrameType|None):
+    cls_type    = None
+    cls_name    = None
+    cls_func    = None
+    cls_object  = None
     if frame:
-        ocls_name, ofun_name = _get_caller(frame)
+        ocls_name, ocls_func, ocls_object = _get_caller(frame)
         if frame := frame.f_back:
-            cls_name, fun_name = _get_caller(frame)
-            if cls == cls_name and ofun_name == fun_name:
+            cls_name, cls_func, cls_object = _get_caller(frame)
+            if cls == cls_name and ocls_func == cls_func:
                 frame = frame.f_back
-                cls_name, fun_name = _get_caller(frame)
+                cls_name, cls_func, cls_object = _get_caller(frame)
         
-            while frame:
-                _globals = frame.f_globals
-                _locals = frame.f_locals
+            if not (cls_name.startswith("<") and cls_name.endswith(">")):
+                while frame: #TODO: <module>
+                    _globals = frame.f_globals
+                    _locals = frame.f_locals
+                    try:
+                        cls_type = eval(cls_name, _globals, _locals) if cls_name else None
+                        break
+                    except Exception as e:
+                        pass
+                    frame = frame.f_back
+
+    return cls_type, cls_func, cls_object
+
+def _find_access(cls, name: str, reverse: bool = False):
+    _cls    = None
+    _access = None
+    __mro__ = type.__getattribute__(cls, "__mro__")
+    if reverse:
+        mro = reversed(__mro__)
+    else:
+        mro = __mro__
+    found = False
+    for _cls in mro:
+        # __access__ = getattr(_cls, "__access__", [])
+        try:
+            __access__ = type.__getattribute__(_cls, "__access__")
+        except Exception as e:
+            continue
+        if name in __access__:
+            _access = __access__[name]
+            found = True
+            break
+    if not found:
+        _cls = None
+    return _cls, _access
+
+"""
+    Check if attribute is in __dict__.
+"""
+def _is_instance(self, name: str):
+    # __dict__ = self.__dict__
+    __dict__ = object.__getattribute__(self, "__dict__")
+    return __dict__ if __dict__ and name in __dict__ else None
+
+# """
+#     Check if specified function is a called.
+#     Needed for contructor hooking.
+# """
+# def __is_child_function(self, frame: FrameType|None, function: str = "__init__"):
+#     if      frame                               \
+#         and (frame := frame.f_back)             \
+#         and frame.f_code.co_name == function    \
+#         and isinstance(self, object_access):#self.__is_child(frame):
+#         return object.__setattr__
+#     return None
+
+
+    """
+        Check if attribute is a property or descriptor of some class.
+    """
+def _is_class(cls, name: str, reverse: bool = False):
+    _class      = None
+    _attribute  = None
+    _set        = None
+    __mro__ = type.__getattribute__(cls, "__mro__")
+    if reverse:
+        mro = reversed(__mro__)
+    else:
+        mro = __mro__
+    for cls in mro:
+        __dict__ = type.__getattribute__(cls, "__dict__")
+        # _dict = cls.__dict__
+        if name in __dict__:
+            attribute = __dict__[name]
+            if attribute:# and type(attribute) == property:
+                # __set__ = getattr(attribute, "__set__", None)
                 try:
-                    cls_type = eval(cls_name, _globals, _locals) if cls_name else None
-                    break
+                    __set__ = object.__getattribute__(attribute, "__set__")
                 except Exception as e:
-                    pass
-                frame = frame.f_back
+                    __set__ = None
+                if __set__:
+                    _class      = cls
+                    _attribute  = attribute
+                    _set        = __set__
+                    # if type(_attribute) == property:
+                    #     is_property = True
+                    # else:
+                    #     is_descriptor = True
+                else:
+                    _class      = cls
+                    _attribute  = attribute
+                    _set        = None
+                if reverse:
+                    continue
+                else:
+                    break
+            break
+    return _class, _attribute, _set
 
-    return cls_type
-
-
+"""
+    Main attribute access checker.
+"""
+def _check_access(cls, frame: FrameType|None, name: str):
+    cls_name = type.__getattribute__(cls, "__name__")
+    _type, _fname, caller = _caller(cls_name, frame)
+    _cls, _access = _find_access(cls, name, True)
+    if _access and _cls and not _access(_cls, _type):
+        raise AttributeError(f"Access to attribute:'{name}' restricted by '{object_access.__raccess__[_access]}' keyword.")
 
 class meta_access(type):
 
@@ -75,13 +175,23 @@ class meta_access(type):
     # @staticmethod
     # def __is_grandchild(cls, cls_) -> bool:
     #     return cls_ != None and issubclass(cls_, meta_access) and (cls_ not in type.__subclasses__(cls))
+
     
     """ Just hook with access check. """
     def __getattribute__(cls, name: str) -> Any:
         frame = inspect.currentframe()
         if not _me(frame):
-            cls._check_access(frame, name)
+            _check_access(cls, frame, name)
         del frame
+
+        if name != "__dict__":
+            __mro__ = type.__getattribute__(cls, "__mro__")
+            for _cls in __mro__:
+                _dict = type.__getattribute__(_cls, "__dict__")
+                if name in _dict:
+                    attribute = _dict[name]
+                    if attribute and type(attribute) == property and hasattr(attribute, "__get__"):
+                        return attribute.__get__(cls)
 
         return super(meta_access, cls).__getattribute__(name)
 
@@ -89,7 +199,7 @@ class meta_access(type):
     def __getattr__(cls, name):
         frame = inspect.currentframe()
         if not _me(frame):
-            cls._check_access(frame, name)
+            _check_access(cls, frame, name)
         del frame
 
         return super(meta_access, cls).__getattribute__(name)
@@ -101,7 +211,7 @@ class meta_access(type):
     def __setattr__(cls, name: str, value: Any) -> None:
         frame = inspect.currentframe()
         if not _me(frame):
-            cls._check_access(frame, name)
+            _check_access(cls, frame, name)
         del frame
 
         if name == "__init__" and value:
@@ -110,10 +220,9 @@ class meta_access(type):
         _dict = type.__getattribute__(cls, "__dict__")
         if name in _dict:
             attribute = _dict[name]
-            # # _dict = object.__getattribute__(attribute, "__dict__")
-            # if "__set__" in attribute:
             if attribute and hasattr(attribute, "__set__"):
                 return attribute.__set__(cls, value)
+
         return super(meta_access, cls).__setattr__(name, value)
 
 
@@ -154,97 +263,18 @@ class object_access(metaclass=meta_access):
                 if len(ann_arg) > 1 and ann_arg[1] in __raccess__:
                     access[name] = ann_arg[1]
         for name in access:
-            _cls, _access = cls.__base__._find_access(name)
+            _cls, _access = _find_access(cls.__base__, name)
             if _cls:
                 raise AttributeError(f"Access to attribute:'{name}' already defined in class:'{_cls.__name__}' with '{object_access.__raccess__[_access]}' keyword.") 
         if access:
             type.__setattr__(cls, "__access__", deepcopy(access))
 
-    @classmethod
-    def _find_access(cls, name: str, reverse: bool = False):
-        _cls    = None
-        _access = None
-        if reverse:
-            mro = reversed(cls.__mro__)
-        else:
-            mro = cls.__mro__
-        found = False
-        for _cls in mro:
-            __access__ = getattr(_cls, "__access__", [])
-            if name in __access__:
-                _access = __access__[name]
-                found = True
-                break
-        if not found:
-            _cls = None
-        return _cls, _access
-
-    """
-        Main attribute access checker.
-    """
-    @classmethod
-    def _check_access(cls, frame: FrameType|None, name: str):
-        _type   = _caller_type(cls.__name__, frame)
-        _cls, _access = cls._find_access(name, True)
-        if _access and _cls and not _access(_cls, _type):
-            raise AttributeError(f"Access to attribute:'{name}' restricted by '{object_access.__raccess__[_access]}' keyword.")
-
-    """
-        Check if attribute is in __dict__.
-    """
-    def __is_instance(self, name: str):
-        # __dict__ = self.__dict__
-        __dict__ = object.__getattribute__(self, "__dict__")
-        return __dict__ if __dict__ and name in __dict__ else None
-
-    """
-        Check if specified function is a called.
-        Needed for contructor hooking.
-    """
-    def __is_child_function(self, frame: FrameType|None, function: str = "__init__"):
-        if      frame                               \
-            and (frame := frame.f_back)             \
-            and frame                               \
-            and frame.f_code.co_name == function    \
-            and isinstance(self, object_access):#self.__is_child(frame):
-            return object.__setattr__
-        return None
-    
-    """
-        Check if attribute is a property or descriptor of some class.
-    """
-    def __is_class(self, name: str, reverse: bool = False):
-        _class = None
-        _attribute = None
-        _set = None
-        __mro__ = object.__getattribute__(type(self), "__mro__")
-        if reverse:
-            mro = reversed(__mro__)
-        else:
-            mro = __mro__
-        for cls in mro:
-            __dict__ = object.__getattribute__(cls, "__dict__")
-            # _dict = cls.__dict__
-            if name in __dict__:
-                _attribute = __dict__[name]
-                if _attribute:# and type(attribute) == property:
-                    _set = getattr(_attribute, "__set__", None)
-                    if _set:
-                        # if type(_attribute) == property:
-                        #     is_property = True
-                        # else:
-                        #     is_descriptor = True
-                        break 
-                _class = cls
-                # cls.__class__.__setattr__(cls, name, value)
-                break
-        return _class, _attribute, _set
 
     """ Just hook with access check. """
     def __getattribute__(self, name: str) -> Any:
         frame = inspect.currentframe()
         if not _me(frame):
-            type(self)._check_access(frame, name)
+            _check_access(type(self), frame, name)
         del frame
         return super(object_access, self).__getattribute__(name)
 
@@ -252,34 +282,52 @@ class object_access(metaclass=meta_access):
     def __getattr__(self, name):
         frame = inspect.currentframe()
         if not _me(frame):
-            type(self)._check_access(frame, name)
+            _check_access(type(self), frame, name)
         del frame
         return object.__getattribute__(self, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-
         frame = inspect.currentframe()
         if not _me(frame):
-            type(self)._check_access(frame, name)
-            
-        __constructor__ = type.__getattribute__(type(self),"__constructor__")
-        if not __constructor__:
-            __constructor__ = "__init__"
-        _object = self.__is_child_function(frame,__constructor__)
-
+            _check_access(type(self), frame, name)
+        
+        _type, _fname, caller = _caller(type(self).__name__, frame)
         del frame
+        if not _type:
+            _type = type(self)
+        # cls = _type if _type and issubclass(_type, object_access) else type(self)
 
-        _dict = self.__is_instance(name)
-        _class, _attribute, _set = self.__is_class(name, _dict == None and _object != None)
+        # Detect if caller is constructor
+        _object = None
+        if issubclass(_type, object_access):
+            if _fname == "__init__":
+                _object = object.__setattr__
+            else:
+                try:
+                    __constructor__ = type.__getattribute__(_type, "__constructor__")
+                except Exception as e:
+                    __constructor__ = None
+                if __constructor__ == _fname:
+                    _object = object.__setattr__
+        if _object:
+            cls = _type
+        else:
+            cls = type(self)
 
-        if (_dict or _object) and not _set: # Define
+        _dict = _is_instance(self, name)
+        _class, _attribute, _set = _is_class(cls, name)
+
+        if _dict and _object:               # Cconstructor
             self.__dict__[name] = value
             return
         if _set:                            # Descriptor
             _set(self, value)
             return
-        if _class:                          # Class
+        if _class and not _object:          # Class
             _class.__class__.__setattr__(_class, name, value)
+            return
+        if _object:                         # 
+            self.__dict__[name] = value
             return
 
         return super(object_access, self).__setattr__(name, value)
@@ -329,117 +377,4 @@ def access(class_) -> Type:
     return type(name, (object_access,), _dict)
 
 if __name__ == '__main__':
-
-    # def class_name(name: str):
-    #     return compile(name + ".__name__.lower()", "<string>", "eval")
-
-    # class Prop():
-
-    #     def __init__(self, value):
-    #         self._value = value
-
-    #     @property
-    #     def value(self):
-    #         return self._value
-        
-    #     @value.setter
-    #     def value(self, value):
-    #         self._value = value
-
-    # def constructor(self):
-    #     self._value = None
-    #     self.data   = "PropBase_instance_data"
-    #     self.value  = "PropBase_instance_value"
-
-    # @access
-    # class PropBase():
-
-    #     __doc__: public
-
-    #     data = "PropBase_class_data"
-    #     value = "PropBase_class_value"
-
-    # PropBase.__init__ = constructor
-
-    # class PropFirst(PropBase):
-
-    #     data = "PropFirst_class_data"
-
-    #     name = descriptor(class_name("PropFirst"))
-
-    #     def __init__(self, value):
-    #         super().__init__()
-    #         self.data   = value + "_instance_data"
-    #         self.value  = value + "_property_value"
-        
-    #     @property
-    #     def value(self):
-    #         return self._value
-        
-    #     @value.setter
-    #     def value(self, value):
-    #         self._value = value
-
-    # class PropSecond(PropFirst):
-
-    #     data = "PropSecond_class_data"
-
-    #     name = descriptor(class_name("PropSecond"))
-
-    #     def __init__(self, value):
-    #         super().__init__(value)
-    #         self.data   = value + "_instance_data"
-    #         self.value  = value + "_property_value"
-        
-    #     @property
-    #     def value(self):
-    #         return self._value
-        
-    #     @value.setter
-    #     def value(self, value):
-    #         self._value = value
-
-    # # subclasses = PropFirst.__childs__
-
-    # prop = Prop("Prop")
-    # print(prop.value)
-    # print(Prop.value)
-
-
-    # propbase = PropBase()
-    # print(propbase.data)
-    # print(propbase.value)
-
-    # prop1 = PropFirst("PropFirst")
-    # print(prop1.data)
-    # print(prop1.value)
-    # print(prop1.name)
-
-    # doc = getattr(PropBase,"__doc__")
-    # setattr(PropBase,"__doc__","PropFirst")
-    # doc = getattr(PropBase,"__doc__")
-
-    # print(PropBase.data)
-    # print(PropBase.name)
-
-    # print(PropFirst.data)
-    # print(PropFirst.value)
-    # print(PropFirst.name)
-    # print()
-    # prop2 = PropSecond("PropSecond")
-    # print(prop2.data)
-    # print(prop2.value)
-    # print(prop2.name)
-
-    # print(PropBase.data)
-    # print(PropBase.name)
-
-    # print(PropFirst.data)
-    # print(PropFirst.value)
-    # print(PropFirst.name)
-
-    # print(PropSecond.data)
-    # print(PropSecond.value)
-    # print(PropSecond.name)
-
-    pass
+   pass

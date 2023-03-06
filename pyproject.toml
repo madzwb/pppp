@@ -3,12 +3,12 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pppp_zwb"
+name = "pppp"
 version = "0.0.1"
 authors = [
   { name="Volodymyr Zawatsky", email="volodymyr.zawatsky@gmail.com" },
 ]
-description = ""
+description = "Runtime attribute access like in C++, aka private, protected, public(by default)."
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
